@@ -1,6 +1,6 @@
 # Nanobanana-COMIC-YAMLtool
 
-Nanobananaで安定した漫画作成を出力させるYAMLを支援するツール
+NanobananaProで漫画を出力させるYAMLを支援するツール
 
 ## 概要
 
