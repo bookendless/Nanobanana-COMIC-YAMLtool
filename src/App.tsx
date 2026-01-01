@@ -303,7 +303,7 @@ const App: React.FC = () => {
                 style_guidelines: data.style_guidelines
             }
         };
-        return jsYaml.dump(output);
+        return "指示: Nano banana proを用いて下記のyamlに従い漫画を作成してください\n" + jsYaml.dump(output);
     }, [data]);
 
     const copyToClipboard = async (text: string) => {
