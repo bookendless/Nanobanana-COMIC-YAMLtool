@@ -48,6 +48,17 @@ body {
     @apply bg-black/20 border border-glass-border rounded-lg px-3 py-3 text-white w-full transition-colors duration-200 focus:outline-none focus:border-primary;
   }
 
+  /* Select要素とOption要素のスタイル */
+  select.input-field {
+    background-color: rgba(0, 0, 0, 0.4) !important;
+    color: #ffffff !important;
+  }
+
+  select.input-field option {
+    background-color: #1e293b !important;
+    color: #ffffff !important;
+  }
+
   /* Tab styling */
   .tab-container {
     @apply flex gap-2 mb-8 border-b border-glass-border pb-2 overflow-x-auto;

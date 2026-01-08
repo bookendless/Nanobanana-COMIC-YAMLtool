@@ -35,6 +35,95 @@
    - 数分でデプロイが完了します
    - `https://your-app-name.netlify.app` のようなURLでアクセス可能になります
 
+## アプリの更新方法
+
+ローカルで変更を加えた後、公開アプリを更新する方法を説明します。
+
+### Netlifyで更新する方法
+
+Netlifyでアプリを更新するには、**GitHubリポジトリと連携している場合**と**手動アップロードの場合**で手順が異なります。
+
+#### 方法A: GitHub連携（推奨・自動デプロイ）
+
+GitHubリポジトリと連携している場合、ローカルで変更をコミット・プッシュするだけで自動的にデプロイされます。
+
+1. **ローカルで変更をコミット**
+   ```bash
+   git add .
+   git commit -m "機能を更新"
+   ```
+
+2. **GitHubにプッシュ**
+   ```bash
+   git push origin main
+   ```
+
+3. **自動デプロイ**
+   - Netlifyが自動的に変更を検知します
+   - Netlifyダッシュボードの「Deploys」タブで進行状況を確認できます
+   - 通常、数分でデプロイが完了します
+
+4. **デプロイ完了の確認**
+   - Netlifyダッシュボードで「Published」ステータスを確認
+   - サイトURL（例: `https://zippy-piroshki-ce560a.netlify.app/`）にアクセスして変更を確認
+
+**メリット:**
+- ✅ 自動的にデプロイされるため手間がかからない
+- ✅ デプロイ履歴が記録される
+- ✅ ロールバックが簡単
+
+#### 方法B: 手動デプロイ
+
+GitHubと連携していない場合、または手動でデプロイしたい場合：
+
+1. **ローカルでビルド**
+   ```bash
+   npm run build
+   ```
+
+2. **Netlifyダッシュボードで手動デプロイ**
+   - Netlifyダッシュボードにログイン
+   - サイトを選択
+   - 「Site settings」→「Build & deploy」→「Continuous Deployment」
+   - 「Deploy site」→「Deploy manually」を選択
+   - `dist`フォルダをドラッグ&ドロップ、または「Browse to upload」で選択
+
+3. **デプロイ完了**
+   - 数分でデプロイが完了します
+
+**注意:** 手動デプロイの場合、毎回`dist`フォルダをアップロードする必要があります。
+
+#### 方法C: Netlify CLIを使用（上級者向け）
+
+Netlify CLIをインストールしてコマンドラインからデプロイすることもできます。
+
+1. **Netlify CLIをインストール**
+   ```bash
+   npm install -g netlify-cli
+   ```
+
+2. **ログイン**
+   ```bash
+   netlify login
+   ```
+
+3. **サイトにリンク**
+   ```bash
+   netlify link
+   ```
+
+4. **デプロイ**
+   ```bash
+   npm run build
+   netlify deploy --prod
+   ```
+
+### デプロイの確認方法
+
+- **Netlifyダッシュボード**: 「Deploys」タブで最新のデプロイ状況を確認
+- **ビルドログ**: デプロイ中の「View build log」でエラーを確認
+- **プレビュー**: デプロイ前に「Preview」で確認可能（本番環境に反映される前）
+
 ### 方法2: Vercel
 
 1. **Vercelアカウントを作成**
@@ -52,6 +141,21 @@
 4. **完了**
    - 数分でデプロイが完了します
    - `https://your-app-name.vercel.app` のようなURLでアクセス可能になります
+
+### Vercelで更新する方法
+
+VercelもGitHubと連携している場合、自動デプロイが有効です。
+
+1. **ローカルで変更をコミット・プッシュ**
+   ```bash
+   git add .
+   git commit -m "機能を更新"
+   git push origin main
+   ```
+
+2. **自動デプロイ**
+   - Vercelが自動的に変更を検知してデプロイします
+   - Vercelダッシュボードで進行状況を確認できます
 
 ### 方法3: GitHub Pages
 
@@ -76,6 +180,21 @@
 4. **完了**
    - 数分でデプロイが完了します
    - `https://your-username.github.io/your-repo-name` のようなURLでアクセス可能になります
+
+### GitHub Pagesで更新する方法
+
+GitHub PagesはGitHub Actionsを使用している場合、自動デプロイが有効です。
+
+1. **ローカルで変更をコミット・プッシュ**
+   ```bash
+   git add .
+   git commit -m "機能を更新"
+   git push origin main
+   ```
+
+2. **自動デプロイ**
+   - GitHub Actionsが自動的にビルドとデプロイを実行します
+   - リポジトリの「Actions」タブで進行状況を確認できます
 
 ## カスタムドメインの設定（オプション）
 

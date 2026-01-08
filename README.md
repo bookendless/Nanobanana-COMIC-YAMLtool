@@ -69,6 +69,18 @@ npm run preview
    - リポジトリのSettings → Pagesで有効化
    - GitHub Actionsで自動デプロイ
 
+### アプリの更新方法
+
+GitHubリポジトリと連携している場合、ローカルで変更をコミット・プッシュするだけで自動的にデプロイされます：
+
+```bash
+git add .
+git commit -m "機能を更新"
+git push origin main
+```
+
+詳細は[DEPLOY.md](./DEPLOY.md)の「アプリの更新方法」セクションを参照してください。
+
 ### プライバシーについて
 
 ✅ **すべてのデータはユーザーのブラウザ（localStorage）に保存されます**  
