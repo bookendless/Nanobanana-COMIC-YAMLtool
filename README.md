@@ -1,6 +1,6 @@
 # Nanobanana-COMIC-YAMLtool
 
-Nanobananaで安定した漫画作成を出力させるYAMLを支援するツール
+NanobananaProで漫画を出力させるYAMLを支援するツール
 
 ## 概要
 
@@ -48,6 +48,32 @@ npm run build
 ```bash
 npm run preview
 ```
+
+## Web公開
+
+このアプリをWeb上に公開する方法については、[DEPLOY.md](./DEPLOY.md)を参照してください。
+
+### 簡単な手順
+
+1. **Netlify（推奨）**
+   - https://www.netlify.com/ でアカウント作成
+   - GitHubリポジトリを接続
+   - 自動デプロイ完了
+
+2. **Vercel**
+   - https://vercel.com/ でアカウント作成
+   - GitHubリポジトリを接続
+   - 自動デプロイ完了
+
+3. **GitHub Pages**
+   - リポジトリのSettings → Pagesで有効化
+   - GitHub Actionsで自動デプロイ
+
+### プライバシーについて
+
+✅ **すべてのデータはユーザーのブラウザ（localStorage）に保存されます**  
+✅ **サーバーにデータが送信されることはありません**  
+✅ **プライバシーリスクはありません**
 
 ## 技術スタック
 

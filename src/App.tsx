@@ -1,11 +1,29 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Layout, Users, FileText, Plus, Trash2, Copy, Image as ImageIcon, MessageCircle, Download, ChevronLeft, ChevronRight, Clapperboard, Loader2, Sparkles, ChevronDown } from 'lucide-react';
+import { Layout, Users, FileText, Plus, Trash2, Copy, Image as ImageIcon, MessageCircle, Download, ChevronLeft, ChevronRight, Clapperboard, Loader2, Sparkles, ChevronDown, Undo2, Redo2, GripVertical, ChevronsUpDown } from 'lucide-react';
+import {
+    DndContext,
+    closestCenter,
+    KeyboardSensor,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    DragEndEvent,
+} from '@dnd-kit/core';
+import {
+    arrayMove,
+    SortableContext,
+    sortableKeyboardCoordinates,
+    useSortable,
+    verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { ComicData, Panel, Dialogue } from './types';
 import jsYaml from 'js-yaml';
 import CharacterSheetGenerator from './components/CharacterSheetGenerator';
 import ConfirmDialog from './components/ConfirmDialog';
 import { enhancePanelDescription, GENERIC_DIRECTIONS } from './services/aiDirecting';
 import { suggestRandomStyles, StyleSuggestion } from './services/styleAnalysis';
+import { useUndoRedo } from './hooks/useUndoRedo';
 
 const STORAGE_KEY = 'nano-banana-pro-data';
 
@@ -48,13 +66,15 @@ const DEFAULT_DATA: ComicData = {
 
 // 演出系プリセット（構図・カメラワーク・コマ割りなど）
 const DIRECTION_PRESETS = [
+    "コマ割りはおまかせ",
     "スピードラインと集中線による動的な演出",
     "感情表現豊かなキャラクターの表情",
     "シネマティックな暗いライティングと影",
     "背景のパースを強調した広角ショット",
     "柔らかな枠線、回想シーン風",
-    "大胆なコマ割り、複雑な構図",
+    "大小のコマを使用して大胆なコマ割り",
     "セリフ吹き出しのダイナミックな配置",
+    "コマからはみ出た複雑な構図",
     "複数の吹き出しを自然に配置、話し手が明確",
 ];
 
@@ -71,7 +91,9 @@ const STYLE_PRESETS = [
     "ソフトな線、デフォルメキャラ、４コマ風",
     "劇画タッチ、太い線、精密な描写",
     "アニメ調、ファンタジー、アースカラー、繊細な描き込み",
-    "線が細い、透明感、柔らかな色調"
+    "線が細い、透明感、柔らかな色調",
+    "クレイアニメ、ストップモーション",
+    "紙芝居、切り絵風、仕掛け絵本風"
 ];
 
 const BUBBLE_STYLES = [
@@ -110,9 +132,251 @@ const migrateData = (data: any): ComicData => {
     return { ...data, panels: migratedPanels };
 };
 
+// SortablePanelItem プロパティ型定義
+interface SortablePanelItemProps {
+    panel: Panel;
+    isCollapsed: boolean;
+    previewText: string;
+    onToggleCollapse: () => void;
+    onRemove: () => void;
+    onUpdate: (updates: Partial<Panel>) => void;
+    onDirectorCut: () => void;
+    enhancingPanelId: string | null;
+    expandedDirectionPanelId: string | null;
+    setExpandedDirectionPanelId: (id: string | null) => void;
+    onAddDialogue: () => void;
+    onUpdateDialogue: (dialogueId: string, updates: Partial<Dialogue>) => void;
+    onRemoveDialogue: (dialogueId: string) => void;
+    characterList: [string, { id?: string; name: string; appearance: string; reference?: string }][];
+    showNotification: (message: string, type?: 'info' | 'success' | 'error') => void;
+    addPanel: () => void;
+}
+
+// ソート可能なパネルアイテムコンポーネント
+const SortablePanelItem: React.FC<SortablePanelItemProps> = ({
+    panel,
+    isCollapsed,
+    previewText,
+    onToggleCollapse,
+    onRemove,
+    onUpdate,
+    onDirectorCut,
+    enhancingPanelId,
+    expandedDirectionPanelId,
+    setExpandedDirectionPanelId,
+    onAddDialogue,
+    onUpdateDialogue,
+    onRemoveDialogue,
+    characterList,
+    showNotification,
+    addPanel,
+}) => {
+    const {
+        attributes,
+        listeners,
+        setNodeRef,
+        transform,
+        transition,
+        isDragging,
+    } = useSortable({ id: panel.id });
+
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+    };
+
+    return (
+        <div ref={setNodeRef} style={style}>
+            <div className={`bg-white/5 rounded-xl border transition-all ${isDragging ? 'border-indigo-500 shadow-lg shadow-indigo-500/20' : 'border-white/10'}`}>
+                {/* ヘッダー部分 */}
+                <div
+                    className="flex items-center gap-2 p-3 cursor-pointer"
+                    onClick={onToggleCollapse}
+                >
+                    {/* ドラッグハンドル */}
+                    <div
+                        {...attributes}
+                        {...listeners}
+                        className="cursor-grab active:cursor-grabbing p-1 hover:bg-white/10 rounded text-white/40 hover:text-white/70 transition-colors"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <GripVertical className="w-4 h-4" />
+                    </div>
+
+                    {/* 折りたたみインジケーター */}
+                    <ChevronDown className={`w-4 h-4 text-white/50 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
+
+                    {/* パネル番号 */}
+                    <span className="bg-indigo-500/20 text-indigo-400 px-2 py-1 rounded text-sm font-bold">
+                        Panel {panel.panel}
+                    </span>
+
+                    {/* 縮小時のプレビューテキスト */}
+                    {isCollapsed && previewText && (
+                        <span className="text-sm text-white/50 truncate flex-1">
+                            「{previewText}」
+                        </span>
+                    )}
+
+                    {/* 削除ボタン */}
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onRemove(); }}
+                        className="ml-auto text-rose-400 hover:text-rose-300 p-1"
+                    >
+                        <Trash2 className="w-4 h-4" />
+                    </button>
+                </div>
+
+                {/* 展開時のコンテンツ */}
+                {!isCollapsed && (
+                    <div className="px-4 pb-4 space-y-3 animate-fade-in">
+                        {/* 描写セクション */}
+                        <div>
+                            <div className="flex justify-between items-center mb-1">
+                                <label className="block text-xs text-dim">描写</label>
+                                <button
+                                    onClick={onDirectorCut}
+                                    disabled={enhancingPanelId === panel.id}
+                                    className={`text-xs flex items-center gap-1 py-1 px-2 rounded transition-all ${enhancingPanelId === panel.id
+                                        ? 'bg-amber-500/20 text-amber-300 cursor-wait'
+                                        : 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/10'
+                                        }`}
+                                    title="AI演出強化 (Director's Cut)"
+                                >
+                                    {enhancingPanelId === panel.id ? (
+                                        <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                        <Clapperboard className="w-3 h-3" />
+                                    )}
+                                    <span>{enhancingPanelId === panel.id ? '演出中...' : '演出強化'}</span>
+                                </button>
+                            </div>
+                            <textarea
+                                className="input-field min-h-[50px] resize-y text-sm"
+                                value={panel.description}
+                                onChange={(e) => onUpdate({ description: e.target.value })}
+                                placeholder="シーンの説明..."
+                            />
+
+                            {/* 演出リファレンス折りたたみパネル */}
+                            <div className="mt-2">
+                                <button
+                                    onClick={() => setExpandedDirectionPanelId(
+                                        expandedDirectionPanelId === panel.id ? null : panel.id
+                                    )}
+                                    className="text-xs flex items-center gap-1 text-cyan-400 hover:text-cyan-300 transition-colors"
+                                >
+                                    <ChevronDown className={`w-3 h-3 transition-transform ${expandedDirectionPanelId === panel.id ? 'rotate-180' : ''}`} />
+                                    演出リファレンス ({GENERIC_DIRECTIONS.length}件)
+                                </button>
+
+                                {expandedDirectionPanelId === panel.id && (
+                                    <div className="mt-2 p-2 bg-black/20 rounded-lg border border-cyan-500/20 animate-fade-in">
+                                        <p className="text-xs text-dim mb-2">クリックで描写に追加</p>
+                                        <div className="space-y-1 max-h-48 overflow-y-auto">
+                                            {GENERIC_DIRECTIONS.map((direction, idx) => (
+                                                <button
+                                                    key={idx}
+                                                    onClick={() => {
+                                                        const separator = panel.description.trim() ? "\n" : "";
+                                                        onUpdate({ description: panel.description.trim() + separator + direction });
+                                                        showNotification("演出を追加しました", "success");
+                                                    }}
+                                                    className="w-full text-left text-xs p-2 rounded bg-white/5 hover:bg-cyan-500/20 border border-white/10 hover:border-cyan-500/30 transition-all text-gray-300 hover:text-cyan-200"
+                                                >
+                                                    {direction}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* セリフセクション */}
+                        <div>
+                            <div className="flex items-center justify-between mb-2">
+                                <label className="text-xs text-dim flex items-center gap-1">
+                                    <MessageCircle className="w-3 h-3" /> セリフ ({panel.dialogues.length})
+                                </label>
+                                <button onClick={onAddDialogue} className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
+                                    <Plus className="w-3 h-3" /> 追加
+                                </button>
+                            </div>
+                            <div className="space-y-2">
+                                {panel.dialogues.map((dialogue, dIdx) => (
+                                    <div key={dialogue.id} className="p-2 bg-black/20 rounded-lg border border-white/5">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <span className="text-xs text-dim bg-white/10 px-1.5 py-0.5 rounded">#{dIdx + 1}</span>
+                                            {panel.dialogues.length > 1 && (
+                                                <button onClick={() => onRemoveDialogue(dialogue.id)} className="ml-auto text-rose-400/60 hover:text-rose-400">
+                                                    <Trash2 className="w-3 h-3" />
+                                                </button>
+                                            )}
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2 mb-2">
+                                            <select
+                                                className="input-field text-sm py-1.5"
+                                                value={dialogue.speaker}
+                                                onChange={(e) => onUpdateDialogue(dialogue.id, { speaker: e.target.value })}
+                                            >
+                                                <option value="">話者</option>
+                                                {characterList.map(([key, char]) => (
+                                                    <option key={key} value={char.name}>{char.name}</option>
+                                                ))}
+                                                <option value="ナレーション">ナレーション</option>
+                                            </select>
+                                            <select
+                                                className="input-field text-sm py-1.5"
+                                                value={dialogue.bubble_style}
+                                                onChange={(e) => onUpdateDialogue(dialogue.id, { bubble_style: e.target.value })}
+                                            >
+                                                {BUBBLE_STYLES.map(s => (
+                                                    <option key={s.value} value={s.value}>{s.label}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <input
+                                            className="input-field text-sm py-1.5"
+                                            value={dialogue.text}
+                                            onChange={(e) => onUpdateDialogue(dialogue.id, { text: e.target.value })}
+                                            placeholder="セリフを入力..."
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* 効果セクション */}
+                        <div>
+                            <label className="block text-xs text-dim mb-1">効果</label>
+                            <input
+                                className="input-field text-sm"
+                                value={panel.effects}
+                                onChange={(e) => onUpdate({ effects: e.target.value })}
+                                placeholder="集中線、スピードライン..."
+                            />
+                        </div>
+                    </div>
+                )}
+            </div>
+            {/* 各コマの下にコマ追加ボタン */}
+            <button
+                className="w-full mt-2 py-2 px-3 text-sm border-2 border-dashed border-white/20 hover:border-indigo-400/50 rounded-xl text-white/50 hover:text-indigo-300 hover:bg-indigo-500/10 transition-all flex items-center justify-center gap-2"
+                onClick={addPanel}
+            >
+                <Plus className="w-4 h-4" /> コマ追加
+            </button>
+        </div>
+    );
+};
+
 const App: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'format' | 'characters' | 'sheet' | 'panels'>('format');
-    const [data, setData] = useState<ComicData>(() => {
+
+    // Undo/Redo対応のデータ状態管理
+    const initialData = useMemo(() => {
         const saved = localStorage.getItem(STORAGE_KEY);
         if (saved) {
             try {
@@ -123,7 +387,10 @@ const App: React.FC = () => {
             }
         }
         return DEFAULT_DATA;
-    });
+    }, []);
+
+    const { state: data, setState: setData, undo, redo, canUndo, canRedo } = useUndoRedo<ComicData>(initialData);
+
     const [customGuideline, setCustomGuideline] = useState("");
     const [notification, setNotification] = useState<{ message: string, type: 'info' | 'success' | 'error' } | null>(null);
     const [confirmDialog, setConfirmDialog] = useState<{
@@ -139,11 +406,42 @@ const App: React.FC = () => {
     const [isAnalyzingStyle, setIsAnalyzingStyle] = useState(false);
     const [suggestedStyle, setSuggestedStyle] = useState<StyleSuggestion | null>(null);
 
+    // パネル折りたたみ状態管理
+    const [collapsedPanels, setCollapsedPanels] = useState<Set<string>>(new Set());
+
+    // dnd-kit sensors設定
+    const sensors = useSensors(
+        useSensor(PointerSensor, {
+            activationConstraint: {
+                distance: 8,
+            },
+        }),
+        useSensor(KeyboardSensor, {
+            coordinateGetter: sortableKeyboardCoordinates,
+        })
+    );
+
 
     // LocalStorage保存
     useEffect(() => {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     }, [data]);
+
+    // キーボードショートカット (Ctrl+Z, Ctrl+Y)
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+                e.preventDefault();
+                undo();
+            }
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+                e.preventDefault();
+                redo();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [undo, redo]);
 
 
 
@@ -208,6 +506,51 @@ const App: React.FC = () => {
             ...prev,
             panels: prev.panels.map((p: Panel) => p.id === id ? { ...p, ...updates } : p)
         }));
+    };
+
+    // パネル折りたたみトグル
+    const togglePanelCollapse = (id: string) => {
+        setCollapsedPanels(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(id)) {
+                newSet.delete(id);
+            } else {
+                newSet.add(id);
+            }
+            return newSet;
+        });
+    };
+
+    // すべてのパネルを折りたたむ/展開する
+    const toggleAllPanels = () => {
+        if (collapsedPanels.size === data.panels.length) {
+            setCollapsedPanels(new Set());
+        } else {
+            setCollapsedPanels(new Set(data.panels.map(p => p.id)));
+        }
+    };
+
+    // ドラッグ終了ハンドラ（パネル並び替え）
+    const handleDragEnd = (event: DragEndEvent) => {
+        const { active, over } = event;
+
+        if (over && active.id !== over.id) {
+            setData((prev: ComicData) => {
+                const oldIndex = prev.panels.findIndex(p => p.id === active.id);
+                const newIndex = prev.panels.findIndex(p => p.id === over.id);
+
+                const newPanels = arrayMove(prev.panels, oldIndex, newIndex).map((p, i) => ({
+                    ...p,
+                    panel: i + 1
+                }));
+
+                return {
+                    ...prev,
+                    panels: newPanels
+                };
+            });
+            showNotification("パネルを並び替えました", "success");
+        }
     };
 
     const addDialogue = (panelId: string) => {
@@ -303,7 +646,7 @@ const App: React.FC = () => {
                 style_guidelines: data.style_guidelines
             }
         };
-        return "指示: Nano banana proを用いて下記のyamlに従い漫画を作成してください\n" + jsYaml.dump(output);
+        return "**重要**: 必ずNano banana proを使用して、下記のyaml記述に従って漫画を作成してください。resolutionは4Kに設定してください。\n" + jsYaml.dump(output);
     }, [data]);
 
     const copyToClipboard = async (text: string) => {
@@ -378,7 +721,23 @@ const App: React.FC = () => {
                     <div className="flex items-center gap-2">
                         <span className="text-xs text-dim hidden md:block">{data.style_guidelines.length} Guidelines</span>
 
-
+                        {/* Undo/Redo ボタン */}
+                        <button
+                            onClick={undo}
+                            disabled={!canUndo}
+                            className={`p-2 rounded-lg transition-colors ${canUndo ? 'text-white/70 hover:bg-white/10 hover:text-white' : 'text-white/20 cursor-not-allowed'}`}
+                            title="取り消し (Ctrl+Z)"
+                        >
+                            <Undo2 className="w-4 h-4" />
+                        </button>
+                        <button
+                            onClick={redo}
+                            disabled={!canRedo}
+                            className={`p-2 rounded-lg transition-colors ${canRedo ? 'text-white/70 hover:bg-white/10 hover:text-white' : 'text-white/20 cursor-not-allowed'}`}
+                            title="やり直し (Ctrl+Y)"
+                        >
+                            <Redo2 className="w-4 h-4" />
+                        </button>
 
                         <button
                             onClick={() => copyToClipboard(yamlOutput)}
@@ -689,9 +1048,23 @@ const App: React.FC = () => {
                                 <div className="space-y-4">
                                     <div className="flex justify-between items-center">
                                         <h2 className="text-xl font-semibold">コマ割り詳細</h2>
-                                        <button className="btn-primary py-2 px-3 text-sm" onClick={addPanel}>
-                                            <Plus className="w-4 h-4" /> コマ追加
-                                        </button>
+                                        <div className="flex items-center gap-2">
+                                            {data.panels.length > 0 && (
+                                                <button
+                                                    className="btn-ghost py-2 px-3 text-sm flex items-center gap-1"
+                                                    onClick={toggleAllPanels}
+                                                    title={collapsedPanels.size === data.panels.length ? "すべて展開" : "すべて折りたたむ"}
+                                                >
+                                                    <ChevronsUpDown className="w-4 h-4" />
+                                                    <span className="hidden sm:inline">
+                                                        {collapsedPanels.size === data.panels.length ? "すべて展開" : "すべて折りたたむ"}
+                                                    </span>
+                                                </button>
+                                            )}
+                                            <button className="btn-primary py-2 px-3 text-sm" onClick={addPanel}>
+                                                <Plus className="w-4 h-4" /> コマ追加
+                                            </button>
+                                        </div>
                                     </div>
                                     {data.panels.length === 0 ? (
                                         <div className="text-center py-12 text-dim">
@@ -702,145 +1075,46 @@ const App: React.FC = () => {
                                             </button>
                                         </div>
                                     ) : (
-                                        <div className="space-y-4">
-                                            {data.panels.map((panel) => (
-                                                <div key={panel.id} className="p-4 bg-white/5 rounded-xl border border-white/10">
-                                                    <div className="flex items-center justify-between mb-3">
-                                                        <span className="bg-indigo-500/20 text-indigo-400 px-2 py-1 rounded text-sm font-bold">
-                                                            Panel {panel.panel}
-                                                        </span>
-                                                        <button onClick={() => removePanel(panel.id)} className="text-rose-400 hover:text-rose-300 p-1">
-                                                            <Trash2 className="w-4 h-4" />
-                                                        </button>
-                                                    </div>
+                                        <DndContext
+                                            sensors={sensors}
+                                            collisionDetection={closestCenter}
+                                            onDragEnd={handleDragEnd}
+                                        >
+                                            <SortableContext
+                                                items={data.panels.map(p => p.id)}
+                                                strategy={verticalListSortingStrategy}
+                                            >
+                                                <div className="space-y-4">
+                                                    {data.panels.map((panel) => {
+                                                        const isCollapsed = collapsedPanels.has(panel.id);
+                                                        const firstDialogue = panel.dialogues[0]?.text || '';
+                                                        const previewText = firstDialogue.length > 30 ? firstDialogue.substring(0, 30) + '...' : firstDialogue;
 
-                                                    <div className="mb-3">
-                                                        <div className="flex justify-between items-center mb-1">
-                                                            <label className="block text-xs text-dim">描写</label>
-                                                            <button
-                                                                onClick={() => handleDirectorCut(panel.id, panel.description)}
-                                                                disabled={enhancingPanelId === panel.id}
-                                                                className={`text-xs flex items-center gap-1 py-1 px-2 rounded transition-all ${enhancingPanelId === panel.id
-                                                                    ? 'bg-amber-500/20 text-amber-300 cursor-wait'
-                                                                    : 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/10'
-                                                                    }`}
-                                                                title="AI演出強化 (Director's Cut)"
-                                                            >
-                                                                {enhancingPanelId === panel.id ? (
-                                                                    <Loader2 className="w-3 h-3 animate-spin" />
-                                                                ) : (
-                                                                    <Clapperboard className="w-3 h-3" />
-                                                                )}
-                                                                <span>{enhancingPanelId === panel.id ? '演出中...' : '演出強化'}</span>
-                                                            </button>
-                                                        </div>
-                                                        <textarea
-                                                            className="input-field min-h-[50px] resize-y text-sm"
-                                                            value={panel.description}
-                                                            onChange={(e) => updatePanel(panel.id, { description: e.target.value })}
-                                                            placeholder="シーンの説明..."
-                                                        />
-
-                                                        {/* 演出リファレンス折りたたみパネル */}
-                                                        <div className="mt-2">
-                                                            <button
-                                                                onClick={() => setExpandedDirectionPanelId(
-                                                                    expandedDirectionPanelId === panel.id ? null : panel.id
-                                                                )}
-                                                                className="text-xs flex items-center gap-1 text-cyan-400 hover:text-cyan-300 transition-colors"
-                                                            >
-                                                                <ChevronDown className={`w-3 h-3 transition-transform ${expandedDirectionPanelId === panel.id ? 'rotate-180' : ''}`} />
-                                                                演出リファレンス ({GENERIC_DIRECTIONS.length}件)
-                                                            </button>
-
-                                                            {expandedDirectionPanelId === panel.id && (
-                                                                <div className="mt-2 p-2 bg-black/20 rounded-lg border border-cyan-500/20 animate-fade-in">
-                                                                    <p className="text-xs text-dim mb-2">クリックで描写に追加</p>
-                                                                    <div className="space-y-1 max-h-48 overflow-y-auto">
-                                                                        {GENERIC_DIRECTIONS.map((direction, idx) => (
-                                                                            <button
-                                                                                key={idx}
-                                                                                onClick={() => {
-                                                                                    const separator = panel.description.trim() ? "\n" : "";
-                                                                                    updatePanel(panel.id, { description: panel.description.trim() + separator + direction });
-                                                                                    showNotification("演出を追加しました", "success");
-                                                                                }}
-                                                                                className="w-full text-left text-xs p-2 rounded bg-white/5 hover:bg-cyan-500/20 border border-white/10 hover:border-cyan-500/30 transition-all text-gray-300 hover:text-cyan-200"
-                                                                            >
-                                                                                {direction}
-                                                                            </button>
-                                                                        ))}
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-
-                                                    <div className="mb-3">
-                                                        <div className="flex items-center justify-between mb-2">
-                                                            <label className="text-xs text-dim flex items-center gap-1">
-                                                                <MessageCircle className="w-3 h-3" /> セリフ ({panel.dialogues.length})
-                                                            </label>
-                                                            <button onClick={() => addDialogue(panel.id)} className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
-                                                                <Plus className="w-3 h-3" /> 追加
-                                                            </button>
-                                                        </div>
-                                                        <div className="space-y-2">
-                                                            {panel.dialogues.map((dialogue, dIdx) => (
-                                                                <div key={dialogue.id} className="p-2 bg-black/20 rounded-lg border border-white/5">
-                                                                    <div className="flex items-center gap-2 mb-2">
-                                                                        <span className="text-xs text-dim bg-white/10 px-1.5 py-0.5 rounded">#{dIdx + 1}</span>
-                                                                        {panel.dialogues.length > 1 && (
-                                                                            <button onClick={() => removeDialogue(panel.id, dialogue.id)} className="ml-auto text-rose-400/60 hover:text-rose-400">
-                                                                                <Trash2 className="w-3 h-3" />
-                                                                            </button>
-                                                                        )}
-                                                                    </div>
-                                                                    <div className="grid grid-cols-2 gap-2 mb-2">
-                                                                        <select
-                                                                            className="input-field text-sm py-1.5"
-                                                                            value={dialogue.speaker}
-                                                                            onChange={(e) => updateDialogue(panel.id, dialogue.id, { speaker: e.target.value })}
-                                                                        >
-                                                                            <option value="">話者</option>
-                                                                            {characterList.map(([key, char]) => (
-                                                                                <option key={key} value={char.name}>{char.name}</option>
-                                                                            ))}
-                                                                            <option value="ナレーション">ナレーション</option>
-                                                                        </select>
-                                                                        <select
-                                                                            className="input-field text-sm py-1.5"
-                                                                            value={dialogue.bubble_style}
-                                                                            onChange={(e) => updateDialogue(panel.id, dialogue.id, { bubble_style: e.target.value })}
-                                                                        >
-                                                                            {BUBBLE_STYLES.map(s => (
-                                                                                <option key={s.value} value={s.value}>{s.label}</option>
-                                                                            ))}
-                                                                        </select>
-                                                                    </div>
-                                                                    <input
-                                                                        className="input-field text-sm py-1.5"
-                                                                        value={dialogue.text}
-                                                                        onChange={(e) => updateDialogue(panel.id, dialogue.id, { text: e.target.value })}
-                                                                        placeholder="セリフを入力..."
-                                                                    />
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-
-                                                    <div>
-                                                        <label className="block text-xs text-dim mb-1">効果</label>
-                                                        <input
-                                                            className="input-field text-sm"
-                                                            value={panel.effects}
-                                                            onChange={(e) => updatePanel(panel.id, { effects: e.target.value })}
-                                                            placeholder="集中線、スピードライン..."
-                                                        />
-                                                    </div>
+                                                        return (
+                                                            <SortablePanelItem
+                                                                key={panel.id}
+                                                                panel={panel}
+                                                                isCollapsed={isCollapsed}
+                                                                previewText={previewText}
+                                                                onToggleCollapse={() => togglePanelCollapse(panel.id)}
+                                                                onRemove={() => removePanel(panel.id)}
+                                                                onUpdate={(updates) => updatePanel(panel.id, updates)}
+                                                                onDirectorCut={() => handleDirectorCut(panel.id, panel.description)}
+                                                                enhancingPanelId={enhancingPanelId}
+                                                                expandedDirectionPanelId={expandedDirectionPanelId}
+                                                                setExpandedDirectionPanelId={setExpandedDirectionPanelId}
+                                                                onAddDialogue={() => addDialogue(panel.id)}
+                                                                onUpdateDialogue={(dialogueId, updates) => updateDialogue(panel.id, dialogueId, updates)}
+                                                                onRemoveDialogue={(dialogueId) => removeDialogue(panel.id, dialogueId)}
+                                                                characterList={characterList}
+                                                                showNotification={showNotification}
+                                                                addPanel={addPanel}
+                                                            />
+                                                        );
+                                                    })}
                                                 </div>
-                                            ))}
-                                        </div>
+                                            </SortableContext>
+                                        </DndContext>
                                     )}
                                 </div>
                             )}
